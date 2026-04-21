@@ -2,7 +2,7 @@ const canvas = document.getElementById('sceneCanvas');
 const ctx = canvas.getContext('2d');
 const wrap = document.querySelector('.canvas-wrap');
 
-const imageSources = ['images/image1.jpg', 'images/image2.png'];
+const imageSources = ['image1.jpg', 'image2.png'];
 const loadedImages = [];
 const imageRects = [];
 const activeDrips = [];
