@@ -1,20 +1,25 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Gothic Blood Effect</title>
-  <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Responsive Blood Canvas</title>
+  <link rel="stylesheet" href="style-3.css" />
 </head>
 <body>
+  <main class="app-shell">
+    <section class="stage" aria-label="Interactive image canvas scene">
+      <div class="canvas-wrap">
+        <canvas id="sceneCanvas" aria-label="Canvas displaying two local images"></canvas>
+      </div>
 
-<div id="container">
-  <img src="image1.jpg" class="back">
-  <img src="image2.jpg" class="front">
+      <div class="instructions">
+        <h1>Interactive canvas</h1>
+        <p>Both local images are drawn inside the canvas. Click an image to make blood drops slide down over it.</p>
+      </div>
+    </section>
+  </main>
 
-  <canvas id="webgl"></canvas>
-  <canvas id="blood"></canvas>
-</div>
-
-<script src="script.js"></script>
+  <script src="script-2.js" defer></script>
 </body>
 </html>
