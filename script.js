@@ -1,105 +1,233 @@
-// ---------- WEBGL (efeito líquido) ----------
-const glCanvas = document.getElementById("webgl");
-const gl = glCanvas.getContext("webgl");
+const canvas = document.getElementById('sceneCanvas');
+const ctx = canvas.getContext('2d');
+const wrap = document.querySelector('.canvas-wrap');
 
-glCanvas.width = window.innerWidth;
-glCanvas.height = window.innerHeight;
+const imageSources = ['images/image1.jpg', 'images/image2.png'];
+const loadedImages = [];
+const imageRects = [];
+const activeDrips = [];
+let hoveredIndex = -1;
+let animationFrame = null;
 
-gl.viewport(0, 0, glCanvas.width, glCanvas.height);
-
-const vertex = `
-attribute vec2 position;
-void main() {
-  gl_Position = vec4(position, 0.0, 1.0);
-}
-`;
-
-const fragment = `
-precision mediump float;
-uniform float time;
-
-void main() {
-  vec2 uv = gl_FragCoord.xy / vec2(${window.innerWidth.toFixed(1)}, ${window.innerHeight.toFixed(1)});
-  
-  float wave = sin(uv.x * 10.0 + time) * 0.02;
-  float drip = smoothstep(0.5 + wave, 0.4, uv.y);
-
-  gl_FragColor = vec4(0.5 * drip, 0.0, 0.0, drip);
-}
-`;
-
-function shader(type, source) {
-  const s = gl.createShader(type);
-  gl.shaderSource(s, source);
-  gl.compileShader(s);
-  return s;
-}
-
-const program = gl.createProgram();
-gl.attachShader(program, shader(gl.VERTEX_SHADER, vertex));
-gl.attachShader(program, shader(gl.FRAGMENT_SHADER, fragment));
-gl.linkProgram(program);
-gl.useProgram(program);
-
-const buffer = gl.createBuffer();
-gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-  -1,-1, 1,-1, -1,1,
-  -1,1, 1,-1, 1,1
-]), gl.STATIC_DRAW);
-
-const pos = gl.getAttribLocation(program, "position");
-gl.enableVertexAttribArray(pos);
-gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
-
-const timeLoc = gl.getUniformLocation(program, "time");
-
-// ---------- PARTÍCULAS ----------
-const bloodCanvas = document.getElementById("blood");
-const ctx = bloodCanvas.getContext("2d");
-
-bloodCanvas.width = window.innerWidth;
-bloodCanvas.height = window.innerHeight;
-
-const particles = [];
-
-for (let i = 0; i < 150; i++) {
-  particles.push({
-    x: Math.random() * bloodCanvas.width,
-    y: Math.random() * bloodCanvas.height,
-    speed: 2 + Math.random() * 4,
-    size: Math.random() * 3 + 1
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`Could not load ${src}`));
+    img.src = src;
   });
 }
 
-// ---------- LOOP ----------
-let time = 0;
+function resizeCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  const { width, height } = wrap.getBoundingClientRect();
+  canvas.width = Math.round(width * dpr);
+  canvas.height = Math.round(height * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawScene();
+}
 
-function render() {
-  time += 0.01;
+function fitImage(img, targetX, targetY, targetWidth, targetHeight) {
+  const imgRatio = img.width / img.height;
+  const targetRatio = targetWidth / targetHeight;
 
-  // WebGL
-  gl.uniform1f(timeLoc, time);
-  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  let drawWidth = targetWidth;
+  let drawHeight = targetHeight;
+  let drawX = targetX;
+  let drawY = targetY;
 
-  // 2D particles
-  ctx.clearRect(0, 0, bloodCanvas.width, bloodCanvas.height);
-  ctx.fillStyle = "red";
+  if (imgRatio > targetRatio) {
+    drawHeight = targetHeight;
+    drawWidth = drawHeight * imgRatio;
+    drawX = targetX - (drawWidth - targetWidth) / 2;
+  } else {
+    drawWidth = targetWidth;
+    drawHeight = drawWidth / imgRatio;
+    drawY = targetY - (drawHeight - targetHeight) / 2;
+  }
 
-  particles.forEach(p => {
-    p.y += p.speed;
+  return { drawX, drawY, drawWidth, drawHeight };
+}
 
-    if (p.y > bloodCanvas.height) {
-      p.y = 0;
-      p.x = Math.random() * bloodCanvas.width;
+function computeLayout() {
+  const width = wrap.clientWidth;
+  const height = wrap.clientHeight;
+  const gap = Math.max(12, Math.min(28, width * 0.025));
+  const padding = Math.max(14, Math.min(28, width * 0.03));
+  const isMobile = width < 700;
+
+  imageRects.length = 0;
+
+  if (isMobile) {
+    const cardHeight = (height - padding * 2 - gap) / 2;
+    imageRects.push({ x: padding, y: padding, w: width - padding * 2, h: cardHeight });
+    imageRects.push({ x: padding, y: padding + cardHeight + gap, w: width - padding * 2, h: cardHeight });
+  } else {
+    const cardWidth = (width - padding * 2 - gap) / 2;
+    imageRects.push({ x: padding, y: padding, w: cardWidth, h: height - padding * 2 });
+    imageRects.push({ x: padding + cardWidth + gap, y: padding, w: cardWidth, h: height - padding * 2 });
+  }
+}
+
+function drawRoundedRect(x, y, w, h, r) {
+  const radius = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.arcTo(x + w, y, x + w, y + h, radius);
+  ctx.arcTo(x + w, y + h, x, y + h, radius);
+  ctx.arcTo(x, y + h, x, y, radius);
+  ctx.arcTo(x, y, x + w, y, radius);
+  ctx.closePath();
+}
+
+function drawImages() {
+  computeLayout();
+
+  imageRects.forEach((rect, index) => {
+    const radius = 22;
+    ctx.save();
+    drawRoundedRect(rect.x, rect.y, rect.w, rect.h, radius);
+    ctx.clip();
+
+    const img = loadedImages[index];
+    const fitted = fitImage(img, rect.x, rect.y, rect.w, rect.h);
+    ctx.drawImage(img, fitted.drawX, fitted.drawY, fitted.drawWidth, fitted.drawHeight);
+
+    const overlay = ctx.createLinearGradient(rect.x, rect.y, rect.x, rect.y + rect.h);
+    overlay.addColorStop(0, 'rgba(0,0,0,0.05)');
+    overlay.addColorStop(1, 'rgba(0,0,0,0.35)');
+    ctx.fillStyle = overlay;
+    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+    ctx.restore();
+
+    ctx.lineWidth = hoveredIndex === index ? 3 : 1.5;
+    ctx.strokeStyle = hoveredIndex === index ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.2)';
+    drawRoundedRect(rect.x, rect.y, rect.w, rect.h, radius);
+    ctx.stroke();
+  });
+}
+
+function createDripsForImage(index) {
+  const rect = imageRects[index];
+  const count = Math.max(10, Math.floor(rect.w / 34));
+
+  for (let i = 0; i < count; i += 1) {
+    activeDrips.push({
+      imageIndex: index,
+      x: rect.x + Math.random() * rect.w,
+      y: rect.y - Math.random() * 30,
+      width: 4 + Math.random() * 10,
+      length: 20 + Math.random() * 90,
+      speed: 1.4 + Math.random() * 2.6,
+      headRadius: 4 + Math.random() * 7,
+      alpha: 0.65 + Math.random() * 0.3,
+    });
+  }
+}
+
+function updateAndDrawDrips() {
+  for (let i = activeDrips.length - 1; i >= 0; i -= 1) {
+    const drip = activeDrips[i];
+    const rect = imageRects[drip.imageIndex];
+
+    drip.y += drip.speed;
+
+    if (drip.y - rect.y > rect.h + drip.length + 20) {
+      activeDrips.splice(i, 1);
+      continue;
     }
 
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-    ctx.fill();
-  });
+    ctx.save();
+    drawRoundedRect(rect.x, rect.y, rect.w, rect.h, 22);
+    ctx.clip();
 
-  requestAnimationFrame(render);
+    const tailTop = Math.max(rect.y, drip.y - drip.length);
+    const gradient = ctx.createLinearGradient(drip.x, tailTop, drip.x, drip.y + drip.headRadius);
+    gradient.addColorStop(0, `rgba(90, 0, 0, 0)`);
+    gradient.addColorStop(0.35, `rgba(125, 0, 0, ${drip.alpha * 0.7})`);
+    gradient.addColorStop(1, `rgba(190, 0, 0, ${drip.alpha})`);
+
+    ctx.strokeStyle = gradient;
+    ctx.lineWidth = drip.width;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(drip.x, tailTop);
+    ctx.lineTo(drip.x, drip.y);
+    ctx.stroke();
+
+    ctx.fillStyle = `rgba(170, 0, 0, ${drip.alpha})`;
+    ctx.beginPath();
+    ctx.arc(drip.x, drip.y, drip.headRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
 }
 
-render();
+function drawLabels() {
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.font = '600 16px Arial';
+  imageRects.forEach((rect, index) => {
+    ctx.fillText(`Image ${index + 1}`, rect.x + 14, rect.y + 26);
+  });
+}
+
+function drawScene() {
+  const width = wrap.clientWidth;
+  const height = wrap.clientHeight;
+  ctx.clearRect(0, 0, width, height);
+
+  const bg = ctx.createLinearGradient(0, 0, 0, height);
+  bg.addColorStop(0, '#141414');
+  bg.addColorStop(1, '#050505');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, width, height);
+
+  if (loadedImages.length === 2) {
+    drawImages();
+    updateAndDrawDrips();
+    drawLabels();
+  } else {
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '600 18px Arial';
+    ctx.fillText('Loading images...', 24, 36);
+  }
+
+  animationFrame = requestAnimationFrame(drawScene);
+}
+
+function getImageIndexAtPoint(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const x = clientX - rect.left;
+  const y = clientY - rect.top;
+  return imageRects.findIndex((item) => x >= item.x && x <= item.x + item.w && y >= item.y && y <= item.y + item.h);
+}
+
+canvas.addEventListener('click', (event) => {
+  const index = getImageIndexAtPoint(event.clientX, event.clientY);
+  if (index >= 0) {
+    createDripsForImage(index);
+  }
+});
+
+canvas.addEventListener('mousemove', (event) => {
+  hoveredIndex = getImageIndexAtPoint(event.clientX, event.clientY);
+});
+
+canvas.addEventListener('mouseleave', () => {
+  hoveredIndex = -1;
+});
+
+window.addEventListener('resize', resizeCanvas);
+
+Promise.all(imageSources.map(loadImage))
+  .then((images) => {
+    loadedImages.push(...images);
+    resizeCanvas();
+    if (!animationFrame) drawScene();
+  })
+  .catch((error) => {
+    console.error(error);
+    ctx.fillStyle = '#fff';
+    ctx.font = '600 18px Arial';
+    ctx.fillText('Failed to load local images from /images.', 24, 36);
+  });
