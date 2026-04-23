@@ -1,25 +1,390 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Responsive Blood Canvas</title>
-  <link rel="stylesheet" href="style.css" />
+  <title>Blood Reveal</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Creepster&family=Raleway:wght@300;400;600&display=swap');
+
+    :root {
+      --blood: #cc0000;
+      --border: rgba(160,0,0,0.35);
+      --text: #e8e0d8;
+      --muted: rgba(232,224,216,0.6);
+      --radius: 5px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      min-height: 100vh;
+      font-family: 'Raleway', sans-serif;
+      background:
+        radial-gradient(ellipse at top, rgba(100,0,0,0.2) 0%, transparent 55%),
+        linear-gradient(180deg, #0d0000 0%, #050505 100%);
+      color: var(--text);
+    }
+
+    .app-shell {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: clamp(16px, 3vw, 40px);
+    }
+
+    .stage {
+      width: min(100%, 860px);
+      display: flex;
+      flex-direction: column;
+      gap: clamp(20px, 2.5vw, 28px);
+    }
+
+    header { text-align: center; }
+
+    header h1 {
+      font-family: 'Creepster', cursive;
+      font-size: clamp(2.4rem, 6vw, 4rem);
+      color: var(--blood);
+      text-shadow: 0 0 40px rgba(200,0,0,0.55), 0 2px 0 #000;
+      letter-spacing: 0.04em;
+      line-height: 1;
+    }
+
+    header p {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: clamp(0.85rem, 1.6vw, 1rem);
+      font-weight: 300;
+      letter-spacing: 0.06em;
+    }
+
+    .canvas-wrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      min-height: 300px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: 0 30px 80px rgba(140,0,0,0.25), inset 0 0 60px rgba(0,0,0,0.5);
+      cursor: crosshair;
+      background: #000;
+    }
+
+    .canvas-wrap canvas {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    #canvasBottom { z-index: 1; }
+    #canvasTop    { z-index: 2; }
+    #canvasBlood  { z-index: 3; pointer-events: none; }
+
+    .cursor-dot {
+      position: fixed;
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #ff2222 20%, #880000 100%);
+      pointer-events: none;
+      transform: translate(-50%, -50%);
+      opacity: 0;
+      transition: opacity 0.15s;
+      z-index: 9999;
+      box-shadow: 0 0 7px rgba(220,0,0,0.9);
+    }
+
+    .hint {
+      padding: clamp(12px, 1.8vw, 18px) clamp(16px, 2.5vw, 24px);
+      border: 1px solid var(--border);
+      border-radius: calc(var(--radius) - 4px);
+      background: rgba(255,255,255,0.03);
+      backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .hint-icon { font-size: 1.6rem; flex-shrink: 0; }
+
+    .hint p {
+      color: var(--muted);
+      font-size: clamp(0.82rem, 1.5vw, 0.95rem);
+      line-height: 1.55;
+    }
+
+    .hint strong { color: var(--text); font-weight: 600; }
+
+    @media (max-width: 600px) {
+      .canvas-wrap { aspect-ratio: 3 / 4; min-height: 380px; }
+    }
+  </style>
 </head>
 <body>
-  <main class="app-shell">
-    <section class="stage" aria-label="Interactive image canvas scene">
-      <div class="canvas-wrap">
-        <canvas id="sceneCanvas" aria-label="Canvas displaying two local images"></canvas>
-      </div>
 
-      <div class="instructions">
-        <h1>Interactive canvas</h1>
-        <p>Both local images are drawn inside the canvas. Click an image to make blood drops slide down over it.</p>
-      </div>
-    </section>
-  </main>
+<div class="cursor-dot" id="cursorDot"></div>
 
-  <script src="script-2.js" defer></script>
+<main class="app-shell">
+  <div class="stage">
+    <header>
+      <h1>Blood Reveal</h1>
+      <p>Passe o rato para revelar o que se esconde por baixo</p>
+    </header>
+
+    <div class="canvas-wrap" id="wrap">
+      <canvas id="canvasBottom"></canvas>
+      <canvas id="canvasTop"></canvas>
+      <canvas id="canvasBlood"></canvas>
+    </div>
+
+    <div class="hint">
+      <span class="hint-icon">🩸</span>
+      <p><strong>Passe o rato</strong> sobre a imagem — gotas de sangue revelam a foto escondida por baixo. <strong>Clique</strong> para um banho de sangue.</p>
+    </div>
+  </div>
+</main>
+
+<script>
+  const wrap      = document.getElementById('wrap');
+  const cBottom   = document.getElementById('canvasBottom');
+  const cTop      = document.getElementById('canvasTop');
+  const cBlood    = document.getElementById('canvasBlood');
+  const xBottom   = cBottom.getContext('2d');
+  const xTop      = cTop.getContext('2d');
+  const xBlood    = cBlood.getContext('2d');
+  const dot       = document.getElementById('cursorDot');
+
+  // imgs[0] = dracula  → BOTTOM (hidden, revealed by blood)
+  // imgs[1] = tripod   → TOP    (visible, erased by blood)
+  let imgs = [];
+  const drips = [];
+  const pools = [];
+  let mx = -1, my = -1, lmx = -1, lmy = -1, over = false;
+
+  // ── Load ──────────────────────────────────────────────────────────────────
+  const loadImg = src => new Promise((ok, fail) => {
+    const i = new Image();
+    i.onload = () => ok(i);
+    i.onerror = () => fail(new Error(src));
+    i.src = src;
+  });
+
+  // ── Cover-fit ─────────────────────────────────────────────────────────────
+  function cover(img, W, H) {
+    const ir = img.width / img.height, cr = W / H;
+    let sx, sy, sw, sh;
+    if (ir > cr) { sh = img.height; sw = sh * cr; sx = (img.width - sw) / 2; sy = 0; }
+    else         { sw = img.width;  sh = sw / cr; sx = 0; sy = (img.height - sh) / 2; }
+    return { sx, sy, sw, sh };
+  }
+
+  // ── Resize — resets both static canvases ──────────────────────────────────
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const W = wrap.clientWidth, H = wrap.clientHeight;
+    [cBottom, cTop, cBlood].forEach(c => {
+      c.width  = Math.round(W * dpr);
+      c.height = Math.round(H * dpr);
+    });
+    xBottom.setTransform(dpr,0,0,dpr,0,0);
+    xTop   .setTransform(dpr,0,0,dpr,0,0);
+    xBlood .setTransform(dpr,0,0,dpr,0,0);
+
+    // Bottom: dark bg + dracula
+    xBottom.fillStyle = '#080808';
+    xBottom.fillRect(0, 0, W, H);
+    if (imgs[0]) {
+      const f = cover(imgs[0], W, H);
+      xBottom.drawImage(imgs[0], f.sx, f.sy, f.sw, f.sh, 0, 0, W, H);
+    }
+
+    // Top: tripod (fully opaque — will be erased)
+    xTop.clearRect(0, 0, W, H);
+    if (imgs[1]) {
+      const f = cover(imgs[1], W, H);
+      xTop.drawImage(imgs[1], f.sx, f.sy, f.sw, f.sh, 0, 0, W, H);
+    }
+
+    drips.length = 0;
+    pools.length = 0;
+  }
+
+  // ── Erase holes in top canvas using destination-out ───────────────────────
+  function eraseCircle(x, y, r) {
+    xTop.save();
+    xTop.globalCompositeOperation = 'destination-out';
+    const g = xTop.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0,   'rgba(0,0,0,1)');
+    g.addColorStop(0.55,'rgba(0,0,0,0.9)');
+    g.addColorStop(1,   'rgba(0,0,0,0)');
+    xTop.fillStyle = g;
+    xTop.beginPath();
+    xTop.arc(x, y, r, 0, Math.PI * 2);
+    xTop.fill();
+    xTop.restore();
+  }
+
+  function eraseLine(x1, y1, x2, y2, w) {
+    xTop.save();
+    xTop.globalCompositeOperation = 'destination-out';
+    xTop.strokeStyle = 'rgba(0,0,0,1)';
+    xTop.lineWidth   = w;
+    xTop.lineCap     = 'round';
+    xTop.beginPath();
+    xTop.moveTo(x1, y1);
+    xTop.lineTo(x2, y2);
+    xTop.stroke();
+    xTop.restore();
+  }
+
+  // ── Spawn drips ───────────────────────────────────────────────────────────
+  function spawn(x, y, burst = false) {
+    const n = burst ? 26 + Math.floor(Math.random() * 18) : 1;
+    for (let i = 0; i < n; i++) {
+      drips.push({
+        x:  x + (burst ? (Math.random()-0.5)*90 : (Math.random()-0.5)*18),
+        y:  y + (burst ? (Math.random()-0.5)*55 : 0),
+        vx: burst ? (Math.random()-0.5)*3.5 : (Math.random()-0.5)*0.7,
+        vy: burst ? 1.4 + Math.random()*4.5 : 2.2 + Math.random()*4,
+        r:  10 + Math.random()*18,        // large drops
+        alpha: 0.8 + Math.random()*0.2,
+        tail: [],
+      });
+    }
+  }
+
+  // ── Main loop ─────────────────────────────────────────────────────────────
+  function loop() {
+    const W = wrap.clientWidth, H = wrap.clientHeight;
+    xBlood.clearRect(0, 0, W, H);
+
+    // spawn from mouse
+    if (over && Math.hypot(mx-lmx, my-lmy) > 10) {
+      if (Math.random() < 0.75) spawn(mx, my);
+      eraseCircle(mx, my, 34 + Math.random()*20);
+      lmx = mx; lmy = my;
+    }
+
+    // update drips
+    for (let i = drips.length-1; i >= 0; i--) {
+      const d = drips[i];
+      d.tail.push({ x: d.x, y: d.y });
+      if (d.tail.length > 45) d.tail.shift();
+
+      const px = d.x, py = d.y;
+      d.x += d.vx;
+      d.y += d.vy;
+      d.vx *= 0.984;
+
+      // erase trail on top canvas
+      eraseLine(px, py, d.x, d.y, d.r * 1.8);
+      eraseCircle(d.x, d.y, d.r * 2);
+
+      if (d.y > H + 30) {
+        pools.push({ x: d.x, y: H-5, r: 6, maxR: d.r*2.8 + Math.random()*16, alpha: d.alpha });
+        drips.splice(i, 1);
+        continue;
+      }
+
+      // draw tail on blood canvas
+      if (d.tail.length > 1) {
+        const tip = d.tail[0];
+        const gr = xBlood.createLinearGradient(d.x, tip.y, d.x, d.y + d.r);
+        gr.addColorStop(0,   `rgba(50,0,0,0)`);
+        gr.addColorStop(0.15,`rgba(100,0,0,${d.alpha*0.45})`);
+        gr.addColorStop(1,   `rgba(220,0,0,${d.alpha})`);
+        xBlood.save();
+        xBlood.strokeStyle = gr;
+        xBlood.lineWidth   = d.r * 1.3;
+        xBlood.lineCap     = 'round';
+        xBlood.lineJoin    = 'round';
+        xBlood.beginPath();
+        xBlood.moveTo(tip.x, tip.y);
+        d.tail.forEach(p => xBlood.lineTo(p.x, p.y));
+        xBlood.lineTo(d.x, d.y);
+        xBlood.stroke();
+        xBlood.restore();
+      }
+
+      // glossy head
+      const hg = xBlood.createRadialGradient(
+        d.x - d.r*0.35, d.y - d.r*0.35, 0,
+        d.x, d.y, d.r*1.4
+      );
+      hg.addColorStop(0,   `rgba(255,70,70,${d.alpha})`);
+      hg.addColorStop(0.38,`rgba(210,0,0,${d.alpha})`);
+      hg.addColorStop(1,   `rgba(45,0,0,${d.alpha*0.4})`);
+      xBlood.save();
+      xBlood.fillStyle = hg;
+      xBlood.beginPath();
+      xBlood.arc(d.x, d.y, d.r, 0, Math.PI*2);
+      xBlood.fill();
+      xBlood.restore();
+    }
+
+    // pools at bottom
+    for (const p of pools) {
+      if (p.r < p.maxR) p.r += 0.22;
+      const pg = xBlood.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r);
+      pg.addColorStop(0,    `rgba(155,0,0,${p.alpha*0.88})`);
+      pg.addColorStop(0.62, `rgba(85,0,0,${p.alpha*0.5})`);
+      pg.addColorStop(1,    `rgba(25,0,0,0)`);
+      xBlood.save();
+      xBlood.fillStyle = pg;
+      xBlood.beginPath();
+      xBlood.ellipse(p.x, p.y, p.r, p.r*0.35, 0, 0, Math.PI*2);
+      xBlood.fill();
+      xBlood.restore();
+    }
+
+    requestAnimationFrame(loop);
+  }
+
+  // ── Events ────────────────────────────────────────────────────────────────
+  wrap.addEventListener('mousemove', e => {
+    const r = wrap.getBoundingClientRect();
+    mx = e.clientX - r.left; my = e.clientY - r.top;
+    over = true;
+    dot.style.left = e.clientX + 'px';
+    dot.style.top  = e.clientY + 'px';
+    dot.style.opacity = '1';
+  });
+
+  wrap.addEventListener('mouseleave', () => { over = false; dot.style.opacity = '0'; });
+
+  wrap.addEventListener('click', e => {
+    const r = wrap.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    spawn(x, y, true);
+    eraseCircle(x, y, 100);
+  });
+
+  wrap.addEventListener('touchmove', e => {
+    e.preventDefault();
+    const r  = wrap.getBoundingClientRect();
+    const t  = e.touches[0];
+    mx = t.clientX - r.left; my = t.clientY - r.top;
+    over = true;
+    if (Math.random() < 0.65) spawn(mx, my);
+    eraseCircle(mx, my, 36);
+    lmx = mx; lmy = my;
+  }, { passive: false });
+
+  wrap.addEventListener('touchend', () => { over = false; });
+  window.addEventListener('resize', resize);
+
+  // ── Boot ──────────────────────────────────────────────────────────────────
+  Promise.all(['image1.png','image2.png'].map(loadImg))
+    .then(loaded => { imgs = loaded; resize(); loop(); })
+    .catch(err => {
+      console.error(err);
+      xBottom.fillStyle = '#fff';
+      xBottom.font = '600 16px sans-serif';
+      xBottom.fillText('Erro ao carregar imagens.', 20, 40);
+    });
+</script>
 </body>
 </html>
